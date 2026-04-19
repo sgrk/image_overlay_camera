@@ -144,6 +144,8 @@
     #btn-clear   { background: #f44336; color: #fff; }
     #btn-edge    { background: #455A64; color: #fff; }
     #btn-edge.active { background: #FF9800; color: #fff; }
+    #btn-move    { background: #455A64; color: #fff; }
+    #btn-move.active { background: #7C4DFF; color: #fff; }
     #capture-row        { margin-top: auto; justify-content: center; }
     #btn-capture {
       flex: none;
@@ -277,6 +279,7 @@
     </div>
     <div class="row">
       <button id="btn-rotate">90° 回転</button>
+      <button id="btn-move">移動: OFF</button>
     </div>
     <div class="row">
       <button id="btn-edge">線画抽出: OFF</button>
@@ -338,6 +341,7 @@
   let stream          = null;
   let selectedCamId   = null;
   let overlayImg    = null;
+  let moveMode      = false;
   let edgeMode      = false;
   let edgeThreshold = 30;
   let edgeCanvas    = null;
@@ -417,7 +421,7 @@
   // Touch gestures
   const viewer = document.getElementById('viewer');
   viewer.addEventListener('touchstart', (e) => {
-    if (!overlayImg) return;
+    if (!overlayImg || !moveMode) return;
     e.preventDefault();
     if (e.touches.length === 1) {
       touch1 = e.touches[0];
@@ -435,7 +439,7 @@
   }, { passive: false });
 
   viewer.addEventListener('touchmove', (e) => {
-    if (!overlayImg) return;
+    if (!overlayImg || !moveMode) return;
     e.preventDefault();
     if (e.touches.length === 1 && !touch2) {
       offsetX = dragOffsetX + e.touches[0].clientX - dragStartX;
@@ -574,6 +578,13 @@
     zoomVal.textContent = cameraZoom.toFixed(1) + 'x';
   });
 
+
+  const btnMove = document.getElementById('btn-move');
+  btnMove.addEventListener('click', () => {
+    moveMode = !moveMode;
+    btnMove.textContent = `移動: ${moveMode ? 'ON' : 'OFF'}`;
+    btnMove.classList.toggle('active', moveMode);
+  });
 
   // Rotate overlay 90°
   btnRotate.addEventListener('click', () => {

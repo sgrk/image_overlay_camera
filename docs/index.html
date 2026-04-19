@@ -442,8 +442,15 @@
     if (!overlayImg || !moveMode) return;
     e.preventDefault();
     if (e.touches.length === 1 && !touch2) {
-      offsetX = dragOffsetX + e.touches[0].clientX - dragStartX;
-      offsetY = dragOffsetY + e.touches[0].clientY - dragStartY;
+      const sdx = e.touches[0].clientX - dragStartX;
+      const sdy = e.touches[0].clientY - dragStartY;
+      if (document.body.classList.contains('native-landscape')) {
+        offsetX = dragOffsetX + sdx;
+        offsetY = dragOffsetY + sdy;
+      } else {
+        offsetX = dragOffsetX + sdy;
+        offsetY = dragOffsetY - sdx;
+      }
     } else if (e.touches.length === 2) {
       const t1 = e.touches[0], t2 = e.touches[1];
       const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);

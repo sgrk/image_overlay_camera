@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>カメラオーバーレイ</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#111111">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="CamOverlay">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #111;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: row;
+      overflow: hidden;
+      position: fixed;
+      width: 100vh;
+      height: 100vw;
+      top: calc((100vh - 100vw) / 2);
+      left: calc((100vw - 100vh) / 2);
+      transform: rotate(90deg);
+      transform-origin: center center;
+    }
+
+    #viewer {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #video {
+      position: absolute;
+      opacity: 0;
+      width: 1px;
+      height: 1px;
+      pointer-events: none;
+    }
+
+    #cam-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #overlay-canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    #controls-wrap {
+      position: relative;
+      height: 100%;
+      display: flex;
+      flex-shrink: 0;
+    }
+    #controls-toggle {
+      position: absolute;
+      left: -28px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 28px;
+      height: 56px;
+      flex: none;
+      background: #2a2a2a;
+      color: #aaa;
+      border-radius: 8px 0 0 8px;
+      font-size: 16px;
+      padding: 0;
+      z-index: 10;
+    }
+    #controls {
+      background: #1a1a1a;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 200px;
+      height: 100%;
+      overflow: hidden;
+      box-sizing: border-box;
+      transition: width 0.3s ease;
+    }
+    #controls.collapsed { width: 92px; }
+    #controls-inner {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+    #controls.collapsed #controls-inner { display: none; }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      flex: 1;
+      padding: 12px 8px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:active { opacity: 0.7; }
+
+    #btn-camera     { background: #2196F3; color: #fff; }
+    #btn-fullscreen { background: #37474F; color: #fff; }
+
+    /* 横向きロック成功時：CSS回転を解除して自然なlandscapeに */
+    body.native-landscape {
+      transform: none;
+      width: 100vw;
+      height: 100vh;
+      top: 0;
+      left: 0;
+    }
+    #btn-flip    { background: #607D8B; color: #fff; }
+    #btn-upload  { background: #4CAF50; color: #fff; }
+    #btn-upload  { background: #4CAF50; color: #fff; }
+    #btn-clear   { background: #f44336; color: #fff; }
+    #btn-edge    { background: #455A64; color: #fff; }
+    #btn-edge.active { background: #FF9800; color: #fff; }
+    #capture-row        { margin-top: auto; justify-content: center; }
+    #btn-capture {
+      flex: none;
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: #e0e0e0;
+      border: 4px solid #fff;
+      outline: 3px solid #aaa;
+      padding: 0;
+      font-size: 0;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    #btn-capture:active { background: #bdbdbd; opacity: 1; transform: scale(0.93); }
+    #btn-rotate         { background: #FF5722; color: #fff; }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .slider-row label { font-size: 11px; white-space: nowrap; width: 58px; }
+    .slider-row input[type=range] { flex: 1; accent-color: #2196F3; min-width: 0; }
+    .slider-row span { font-size: 11px; width: 32px; text-align: right; }
+
+
+    #camera-select {
+      flex: 1;
+      min-width: 0;
+      font-size: 11px;
+      background: #333;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 3px 4px;
+    }
+
+    #zoom-overlay {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.45);
+      pointer-events: none;
+      z-index: 5;
+    }
+    #zoom-overlay input[type=range] {
+      pointer-events: auto;
+      width: 160px;
+      height: 36px;
+      transform: rotate(-90deg);
+      cursor: pointer;
+      accent-color: #2196F3;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+    }
+    #zoom-overlay input[type=range]::-webkit-slider-runnable-track {
+      height: 8px;
+      background: #555;
+      border-radius: 4px;
+    }
+    #zoom-overlay input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #2196F3;
+      margin-top: -12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
+    #zoom-overlay input[type=range]::-moz-range-track {
+      height: 8px;
+      background: #555;
+      border-radius: 4px;
+    }
+    #zoom-overlay input[type=range]::-moz-range-thumb {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #2196F3;
+      border: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
+    #zoom-val {
+      position: absolute;
+      bottom: 8px;
+      font-size: 10px;
+      color: #fff;
+    }
+
+    #status {
+      font-size: 12px;
+      color: #aaa;
+      text-align: center;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="viewer">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="cam-canvas"></canvas>
+  <canvas id="overlay-canvas"></canvas>
+  <div id="zoom-overlay">
+    <input type="range" id="zoom-slider" min="100" max="400" value="100">
+    <span id="zoom-val">1.0x</span>
+  </div>
+</div>
+
+<div id="controls-wrap">
+<button id="controls-toggle">▶</button>
+<div id="controls">
+  <div id="controls-inner">
+    <div class="row">
+      <button id="btn-camera">カメラ起動</button>
+      <button id="btn-fullscreen">全画面</button>
+    </div>
+    <div class="slider-row" id="camera-select-row" style="display:none">
+      <label>カメラ</label>
+      <select id="camera-select"></select>
+    </div>
+    <div class="row">
+      <button id="btn-upload">画像を選択</button>
+      <button id="btn-clear">画像クリア</button>
+    </div>
+    <div class="row">
+      <button id="btn-rotate">90° 回転</button>
+    </div>
+    <div class="row">
+      <button id="btn-edge">線画抽出: OFF</button>
+    </div>
+    <div class="slider-row" id="threshold-row" style="display:none">
+      <label>閾値</label>
+      <input type="range" id="threshold-slider" min="1" max="200" value="30">
+      <span id="threshold-val">30</span>
+    </div>
+    <div class="slider-row" id="edge-opacity-row" style="display:none">
+      <label>2値化 透明度</label>
+      <input type="range" id="edge-opacity-slider" min="0" max="100" value="50">
+      <span id="edge-opacity-val">50%</span>
+    </div>
+    <div class="slider-row" id="opacity-row">
+      <label>画像 透明度</label>
+      <input type="range" id="opacity-slider" min="0" max="100" value="50">
+      <span id="opacity-val">50%</span>
+    </div>
+    <div id="status">カメラを起動してください</div>
+  </div>
+  <div class="row" id="capture-row">
+    <button id="btn-capture" title="撮影・保存"></button>
+  </div>
+</div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" style="display:none">
+
+<script>
+  const video          = document.getElementById('video');
+  const camCanvas      = document.getElementById('cam-canvas');
+  const camCtx         = camCanvas.getContext('2d');
+  const canvas         = document.getElementById('overlay-canvas');
+  const ctx            = canvas.getContext('2d');
+  const btnCamera         = document.getElementById('btn-camera');
+  const btnFullscreen     = document.getElementById('btn-fullscreen');
+  const cameraSelect      = document.getElementById('camera-select');
+  const cameraSelectRow   = document.getElementById('camera-select-row');
+  const btnUpload      = document.getElementById('btn-upload');
+  const btnClear       = document.getElementById('btn-clear');
+  const fileInput      = document.getElementById('file-input');
+  const btnCapture       = document.getElementById('btn-capture');
+  const btnRotate        = document.getElementById('btn-rotate');
+  const btnEdge        = document.getElementById('btn-edge');
+  const opacitySlider      = document.getElementById('opacity-slider');
+  const opacityVal         = document.getElementById('opacity-val');
+  const edgeOpacitySlider  = document.getElementById('edge-opacity-slider');
+  const edgeOpacityVal     = document.getElementById('edge-opacity-val');
+  const edgeOpacityRow     = document.getElementById('edge-opacity-row');
+  const thresholdSlider    = document.getElementById('threshold-slider');
+  const thresholdVal       = document.getElementById('threshold-val');
+  const thresholdRow       = document.getElementById('threshold-row');
+  const opacityRow         = document.getElementById('opacity-row');
+  const zoomSlider         = document.getElementById('zoom-slider');
+  const zoomVal            = document.getElementById('zoom-val');
+  const status             = document.getElementById('status');
+
+  let stream          = null;
+  let selectedCamId   = null;
+  let overlayImg    = null;
+  let edgeMode      = false;
+  let edgeThreshold = 30;
+  let edgeCanvas    = null;
+  let cameraZoom    = 1.0;
+  let opacity       = 0.5;
+  let opacityEdge   = 0.5;
+  let scale         = 1.0;
+  let offsetX       = 0;
+  let offsetY       = 0;
+  let rotation      = 0;
+
+  // Touch state
+  let touch1 = null, touch2 = null;
+  let pinchStartDist  = 0;
+  let pinchStartScale = 1;
+  let dragStartX = 0, dragStartY = 0;
+  let dragOffsetX = 0, dragOffsetY = 0;
+
+  // Canvas resize
+  function resizeCanvas() {
+    const w = canvas.offsetWidth;
+    const h = canvas.offsetHeight;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width  = w; canvas.height  = h;
+      camCanvas.width = w; camCanvas.height = h;
+    }
+  }
+  new ResizeObserver(resizeCanvas).observe(canvas);
+  resizeCanvas();
+
+  function drawImageRotated(targetCtx, src, iw, ih, cx, cy, alpha) {
+    targetCtx.save();
+    targetCtx.translate(cx, cy);
+    targetCtx.rotate(rotation * Math.PI / 180);
+    targetCtx.globalAlpha = alpha;
+    targetCtx.drawImage(src, -iw / 2, -ih / 2, iw, ih);
+    targetCtx.globalAlpha = 1;
+    targetCtx.restore();
+  }
+
+  // Unified draw loop: camera canvas + overlay canvas
+  function drawFrame() {
+    const cw = camCanvas.width;
+    const ch = camCanvas.height;
+
+    camCtx.clearRect(0, 0, cw, ch);
+    if (video.readyState >= 2) {
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const portrait = vw < vh;
+      // After optional 90° rotation, logical size becomes (vh x vw) or (vw x vh)
+      const logW = portrait ? vh : vw;
+      const logH = portrait ? vw : vh;
+      const coverScale = Math.max(cw / logW, ch / logH) * cameraZoom;
+      camCtx.save();
+      camCtx.translate(cw / 2, ch / 2);
+      if (portrait) camCtx.rotate(-Math.PI / 2);
+      camCtx.scale(coverScale, coverScale);
+      camCtx.drawImage(video, -vw / 2, -vh / 2, vw, vh);
+      camCtx.restore();
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const src = (edgeMode && edgeCanvas) ? edgeCanvas : overlayImg;
+    if (src && overlayImg) {
+      const iw = overlayImg.naturalWidth  * scale;
+      const ih = overlayImg.naturalHeight * scale;
+      const cx = canvas.width  / 2 + offsetX;
+      const cy = canvas.height / 2 + offsetY;
+      drawImageRotated(ctx, src, iw, ih, cx, cy, edgeMode && edgeCanvas ? opacityEdge : opacity);
+    }
+
+    requestAnimationFrame(drawFrame);
+  }
+  drawFrame();
+
+  // Touch gestures
+  const viewer = document.getElementById('viewer');
+  viewer.addEventListener('touchstart', (e) => {
+    if (!overlayImg) return;
+    e.preventDefault();
+    if (e.touches.length === 1) {
+      touch1 = e.touches[0];
+      touch2 = null;
+      dragStartX  = touch1.clientX;
+      dragStartY  = touch1.clientY;
+      dragOffsetX = offsetX;
+      dragOffsetY = offsetY;
+    } else if (e.touches.length === 2) {
+      touch1 = e.touches[0];
+      touch2 = e.touches[1];
+      pinchStartDist  = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+      pinchStartScale = scale;
+    }
+  }, { passive: false });
+
+  viewer.addEventListener('touchmove', (e) => {
+    if (!overlayImg) return;
+    e.preventDefault();
+    if (e.touches.length === 1 && !touch2) {
+      offsetX = dragOffsetX + e.touches[0].clientX - dragStartX;
+      offsetY = dragOffsetY + e.touches[0].clientY - dragStartY;
+    } else if (e.touches.length === 2) {
+      const t1 = e.touches[0], t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      scale = Math.max(0.01, pinchStartScale * (dist / pinchStartDist));
+    }
+  }, { passive: false });
+
+  viewer.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) touch2 = null;
+    if (e.touches.length === 0) touch1 = null;
+  });
+
+  // Camera
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      status.textContent = 'HTTPSが必要です。https:// でアクセスしてください';
+      return;
+    }
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    try {
+      const videoConstraint = selectedCamId
+        ? { deviceId: { exact: selectedCamId }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        : { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 }, aspectRatio: { ideal: 16/9 } };
+      stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: false });
+      video.srcObject = stream;
+      btnCamera.textContent = 'カメラ停止';
+      status.textContent = 'カメラ起動中';
+      await enumerateCameras();
+    } catch (e) {
+      status.textContent = 'カメラアクセス失敗: ' + (e.message || e.name);
+    }
+  }
+
+  async function enumerateCameras() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    if (cams.length < 2) { cameraSelectRow.style.display = 'none'; return; }
+
+    const currentTrack = stream && stream.getVideoTracks()[0];
+    const currentId = currentTrack ? currentTrack.getSettings().deviceId : null;
+
+    cameraSelect.innerHTML = '';
+    cams.forEach((cam, i) => {
+      const opt = document.createElement('option');
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || `カメラ ${i + 1}`;
+      if (cam.deviceId === currentId) opt.selected = true;
+      cameraSelect.appendChild(opt);
+    });
+    cameraSelectRow.style.display = 'flex';
+  }
+
+  function stopCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; video.srcObject = null; }
+    btnCamera.textContent = 'カメラ起動';
+    cameraSelectRow.style.display = 'none';
+    status.textContent = 'カメラ停止中';
+  }
+
+  btnCamera.addEventListener('click', () => { if (stream) stopCamera(); else startCamera(); });
+
+  btnFullscreen.addEventListener('click', async () => {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen();
+      try {
+        await screen.orientation.lock('landscape');
+        document.body.classList.add('native-landscape');
+        btnFullscreen.textContent = '全画面解除';
+      } catch (e) {
+        // iOS など非対応：CSS回転のままフルスクリーンのみ
+        btnFullscreen.textContent = '全画面解除';
+      }
+    } else {
+      await document.exitFullscreen();
+    }
+  });
+
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) {
+      screen.orientation?.unlock?.();
+      document.body.classList.remove('native-landscape');
+      btnFullscreen.textContent = '全画面';
+    }
+  });
+
+  cameraSelect.addEventListener('change', () => {
+    selectedCamId = cameraSelect.value;
+    if (stream) startCamera();
+  });
+
+
+  btnUpload.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    status.textContent = '画像を読み込み中...';
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        overlayImg = img;
+        scale = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+        offsetX = 0; offsetY = 0;
+        if (edgeMode) buildEdgeCanvas();
+        else status.textContent = '画像を読み込みました';
+      };
+      img.src = e.target.result;
+    };
+    reader.onerror = () => { status.textContent = '画像の読み込みに失敗しました'; };
+    reader.readAsDataURL(file);
+    fileInput.value = '';
+  });
+
+  btnClear.addEventListener('click', () => {
+    overlayImg = null; edgeCanvas = null;
+    offsetX = 0; offsetY = 0;
+    status.textContent = '画像をクリアしました';
+  });
+
+  opacitySlider.addEventListener('input', () => {
+    opacity = opacitySlider.value / 100;
+    opacityVal.textContent = opacitySlider.value + '%';
+  });
+
+  edgeOpacitySlider.addEventListener('input', () => {
+    opacityEdge = edgeOpacitySlider.value / 100;
+    edgeOpacityVal.textContent = edgeOpacitySlider.value + '%';
+  });
+
+  zoomSlider.addEventListener('input', () => {
+    cameraZoom = zoomSlider.value / 100;
+    zoomVal.textContent = cameraZoom.toFixed(1) + 'x';
+  });
+
+
+  // Rotate overlay 90°
+  btnRotate.addEventListener('click', () => {
+    rotation = (rotation + 90) % 360;
+  });
+
+  // Capture: composite video + overlay → save to photo library
+  btnCapture.addEventListener('click', async () => {
+    if (!stream) { status.textContent = 'カメラが起動していません'; return; }
+
+    let blob;
+    try {
+      const track = stream.getVideoTracks()[0];
+      const imageCapture = new ImageCapture(track);
+      blob = await imageCapture.takePhoto();
+      status.textContent = '撮影しました';
+    } catch (e) {
+      blob = await new Promise(resolve =>
+        camCanvas.toBlob(resolve, 'image/jpeg', 0.95)
+      );
+      status.textContent = '撮影しました（フォールバック）';
+    }
+
+    const filename = `photo_${Date.now()}.jpg`;
+    const file = new File([blob], filename, { type: blob.type || 'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'カメラオーバーレイ' });
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+      }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // Edge binarization
+  function buildEdgeCanvas() {
+    if (!overlayImg) return;
+    status.textContent = 'エッジ処理中...';
+    const MAX = 1200;
+    const ratio = Math.min(1, MAX / Math.max(overlayImg.naturalWidth, overlayImg.naturalHeight));
+    const w = Math.round(overlayImg.naturalWidth  * ratio);
+    const h = Math.round(overlayImg.naturalHeight * ratio);
+    const oc = document.createElement('canvas');
+    oc.width = w; oc.height = h;
+    const octx = oc.getContext('2d');
+    octx.drawImage(overlayImg, 0, 0, w, h);
+    const src = octx.getImageData(0, 0, w, h).data;
+    const gray = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      gray[i] = 0.299 * src[i*4] + 0.587 * src[i*4+1] + 0.114 * src[i*4+2];
+    }
+    const dst = octx.createImageData(w, h);
+    const out = dst.data;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const gx =
+          -    gray[(y-1)*w+(x-1)] + gray[(y-1)*w+(x+1)]
+          - 2 *gray[  y  *w+(x-1)] + 2*gray[  y  *w+(x+1)]
+          -    gray[(y+1)*w+(x-1)] + gray[(y+1)*w+(x+1)];
+        const gy =
+          -gray[(y-1)*w+(x-1)] - 2*gray[(y-1)*w+x] - gray[(y-1)*w+(x+1)]
+          +gray[(y+1)*w+(x-1)] + 2*gray[(y+1)*w+x] + gray[(y+1)*w+(x+1)];
+        const idx = (y * w + x) * 4;
+        const isEdge = Math.sqrt(gx*gx + gy*gy) > edgeThreshold;
+        out[idx]   = 0;
+        out[idx+1] = isEdge ? 120 : 0;
+        out[idx+2] = isEdge ? 255 : 0;
+        out[idx+3] = isEdge ? 255 : 0;
+      }
+    }
+    octx.putImageData(dst, 0, 0);
+    edgeCanvas = oc;
+    status.textContent = '線画抽出モード ON';
+  }
+
+  btnEdge.addEventListener('click', () => {
+    edgeMode = !edgeMode;
+    btnEdge.textContent = `線画抽出: ${edgeMode ? 'ON' : 'OFF'}`;
+    btnEdge.classList.toggle('active', edgeMode);
+    thresholdRow.style.display    = edgeMode ? 'flex' : 'none';
+    edgeOpacityRow.style.display  = edgeMode ? 'flex' : 'none';
+    opacityRow.style.display      = edgeMode ? 'none' : 'flex';
+    if (edgeMode) buildEdgeCanvas();
+    else status.textContent = '線画抽出モード OFF';
+  });
+
+  thresholdSlider.addEventListener('input', () => {
+    edgeThreshold = Number(thresholdSlider.value);
+    thresholdVal.textContent = edgeThreshold;
+    if (edgeMode) buildEdgeCanvas();
+  });
+
+  const controls = document.getElementById('controls');
+  document.getElementById('controls-toggle').addEventListener('click', () => {
+    const collapsed = controls.classList.toggle('collapsed');
+    document.getElementById('controls-toggle').textContent = collapsed ? '◀' : '▶';
+  });
+
+  // Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+</script>
+</body>
+</html>
